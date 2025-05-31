@@ -1,0 +1,14 @@
+.idea/
+Library/
+obj/
+Temp/
+UserSettings/
+*.csproj
+*.sln
+Assets/LocalTest/
+Assets/LocalTest.meta
+Logs/
+LearnURP.sln.DotSettings.user
+.vscode/
+.vs/
+.vsconfig
