@@ -70,6 +70,8 @@ Shader "Tutorial/Diffuse"
             
             #pragma raytracing test
 
+            #include "UnityRaytracingMeshUtils.cginc"
+
             struct AttributeData
             {
                 float2 barycentrics;
@@ -80,6 +82,19 @@ Shader "Tutorial/Diffuse"
                 float4 color;
             };
 
+            struct IntersectionVertex
+            {
+                // Object space normal of the vertex
+                float3 normalOS;
+            };
+
+            void FetchIntersectionVertex(uint vertexIndex, out IntersectionVertex outVertex)
+            {
+                outVertex.normalOS = UnityRayTracingFetchVertexAttribute3(vertexIndex, kVertexAttributeNormal);
+            }
+
+            #define INTERPOLATE_RAYTRACING_ATTRIBUTE(A0, A1, A2, BARYCENTRIC_COORDINATES) (A0 * BARYCENTRIC_COORDINATES.x + A1 * BARYCENTRIC_COORDINATES.y + A2 * BARYCENTRIC_COORDINATES.z)
+
             CBUFFER_START(UnityPerMaterial)
             float4 _Color;
             CBUFFER_END
@@ -87,7 +102,23 @@ Shader "Tutorial/Diffuse"
             [shader("closesthit")]
             void ClosestHitShader(inout RayIntersection rayIntersection : SV_RayPayload, AttributeData attributeData : SV_IntersectionAttributes)
             {
-                rayIntersection.color = _Color;
+                // Fetch the indices of the currentr triangle
+                uint3 triangleIndices = UnityRayTracingFetchTriangleIndices(PrimitiveIndex());
+
+                // Fetch the 3 vertices
+                IntersectionVertex v0, v1, v2;
+                FetchIntersectionVertex(triangleIndices.x, v0);
+                FetchIntersectionVertex(triangleIndices.y, v1);
+                FetchIntersectionVertex(triangleIndices.z, v2);
+
+                // Compute the full barycentric coordinates
+                float3 barycentricCoordinates = float3(1.0f - attributeData.barycentrics.x - attributeData.barycentrics.y, attributeData.barycentrics.x, attributeData.barycentrics.y);
+
+                float3 normalOS = INTERPOLATE_RAYTRACING_ATTRIBUTE(v0.normalOS, v1.normalOS, v2.normalOS, barycentricCoordinates);
+                float3x3 objectToWorld = (float3x3)ObjectToWorld3x4();
+                float3 normalWS = normalize(mul(objectToWorld, normalOS));
+
+                rayIntersection.color = float4(0.5f * (normalWS + 1.0f), 0.0f);
             }
 
             ENDHLSL
