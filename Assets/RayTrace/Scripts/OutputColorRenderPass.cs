@@ -6,17 +6,20 @@ using UnityEngine.Experimental.Rendering; // 用于 RTHandle
 public class OutputColorRenderPass : ScriptableRenderPass
 {
     private RayTracingShader _ray_tracing_shader = null;
+    private RayTracingAccelerationStructure _acceleration_structure = null;
     private RTHandle _output_target;
     private Camera m_Camera;
 
     public OutputColorRenderPass()
     {
         _ray_tracing_shader = Resources.Load<RayTracingShader>("Shaders/OutputColor");
+        _acceleration_structure = new RayTracingAccelerationStructure();
     }
 
     private static class GpuParams
     {
         public static readonly int OutputTarget = Shader.PropertyToID("_OutputTarget");
+        public static readonly int AccelerationStructure = Shader.PropertyToID("_AccelerationStructure");
     }
 
     private static class CameraShaderParams
@@ -32,6 +35,12 @@ public class OutputColorRenderPass : ScriptableRenderPass
 
     public override void Configure(CommandBuffer cmd, RenderTextureDescriptor cameraTextureDescriptor)
     {
+        var allRenderers = GameObject.FindObjectsOfType<MeshRenderer>();
+        foreach (var rnd in allRenderers) {
+            // 提前给这些 Renderer 打上同一个 Layer，或者用 RayTracingLayer 来筛选
+            _acceleration_structure.AddInstance(rnd);
+        }
+
         var outputColorDesc = cameraTextureDescriptor;
         outputColorDesc.enableRandomWrite = true;
         outputColorDesc.colorFormat = RenderTextureFormat.ARGBFloat;
@@ -63,18 +72,22 @@ public class OutputColorRenderPass : ScriptableRenderPass
 
         using (new ProfilingScope(cmd, new ProfilingSampler("RayTracing")))
         {
+            cmd.BuildRayTracingAccelerationStructure(_acceleration_structure);
+            cmd.SetRayTracingAccelerationStructure(_ray_tracing_shader, GpuParams.AccelerationStructure, _acceleration_structure);
+
             cmd.SetGlobalVector(CameraShaderParams._WorldSpaceCameraPos, m_Camera.transform.position);
             var projMatrix = GL.GetGPUProjectionMatrix(m_Camera.projectionMatrix, false);
             var viewMatrix = m_Camera.worldToCameraMatrix;
             var viewProjMatrix = projMatrix * viewMatrix;
             var invViewProjMatrix = Matrix4x4.Inverse(viewProjMatrix);
             cmd.SetGlobalMatrix(CameraShaderParams._InvCameraViewProj, invViewProjMatrix);
+            cmd.SetGlobalFloat(CameraShaderParams._CameraFarDistance, m_Camera.farClipPlane);
 
             cmd.SetRayTracingTextureParam(_ray_tracing_shader, GpuParams.OutputTarget, _output_target);
             cmd.SetRayTracingShaderPass(_ray_tracing_shader, "RayTracing");
 
             var cameraDescriptor = renderingData.cameraData.cameraTargetDescriptor;
-            cmd.DispatchRays(_ray_tracing_shader, "OutputColorRayGenShader", (uint)cameraDescriptor.width, (uint)cameraDescriptor.height, 1);
+            cmd.DispatchRays(_ray_tracing_shader, "AddASphereRayGenShader", (uint)cameraDescriptor.width, (uint)cameraDescriptor.height, 1);
         }
 
         using (new ProfilingScope(cmd, new ProfilingSampler("FinalBlit")))

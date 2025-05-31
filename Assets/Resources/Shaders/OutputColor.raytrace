@@ -4,10 +4,17 @@
 #define CBUFFER_END };
 
 CBUFFER_START(CameraBuffer)
-    float4x4 _InvCameraViewProj;
-    float3   _WorldSpaceCameraPos;
-    float4x4 _CameraFarDistance;
+  float4x4 _InvCameraViewProj;
+  float3   _WorldSpaceCameraPos;
+  float    _CameraFarDistance;
 CBUFFER_END
+
+struct RayIntersection
+{
+  float4 color;
+};
+
+RaytracingAccelerationStructure _AccelerationStructure;
 
 RWTexture2D<float4> _OutputTarget;
 
@@ -25,14 +32,14 @@ inline void GenerateCameraRay(out float3 origin, out float3 direction)
   direction = normalize(world.xyz - origin);
 }
 
-inline float3 Color(float3 origin, float3 direction)
+inline float3 BackgroundColor(float3 origin, float3 direction)
 {
   float t = 0.5f * (direction.y + 1.0f);
   return (1.0f - t) * float3(1.0f, 1.0f, 1.0f) + t * float3(0.5f, 0.7f, 1.0f);
 }
 
 [shader("raygeneration")]
-void OutputColorRayGenShader()
+void AddASphereRayGenShader()
 {
     const uint2 dispatchIdx = DispatchRaysIndex().xy;
     
@@ -40,5 +47,24 @@ void OutputColorRayGenShader()
     float3 direction;
     GenerateCameraRay(origin, direction);
 
-    _OutputTarget[dispatchIdx] = float4(Color(origin, direction), 1.0f);
+    RayDesc rayDesc;
+    rayDesc.Origin = origin;
+    rayDesc.Direction = direction;
+    rayDesc.TMin = 1e-5f;
+    rayDesc.TMax = _CameraFarDistance;
+
+    RayIntersection rayIntersection;
+    rayIntersection.color = float4(0.0f, 0.0f, 0.0f, 0.0f);
+
+    TraceRay(_AccelerationStructure, RAY_FLAG_CULL_BACK_FACING_TRIANGLES, 0xFF, 0, 1, 0, rayDesc, rayIntersection);
+
+    _OutputTarget[dispatchIdx] = rayIntersection.color;
+}
+
+[shader("miss")]
+void MissShader(inout RayIntersection rayIntersection : SV_RayPayload)
+{
+    float3 origin = WorldRayOrigin();
+    float3 direction = WorldRayDirection();
+    rayIntersection.color = float4(BackgroundColor(origin, direction), 1.0f);
 }
