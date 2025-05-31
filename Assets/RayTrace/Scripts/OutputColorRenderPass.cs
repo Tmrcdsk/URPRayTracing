@@ -7,6 +7,7 @@ public class OutputColorRenderPass : ScriptableRenderPass
 {
     private RayTracingShader _ray_tracing_shader = null;
     private RTHandle _output_target;
+    private Camera m_Camera;
 
     public OutputColorRenderPass()
     {
@@ -16,6 +17,13 @@ public class OutputColorRenderPass : ScriptableRenderPass
     private static class GpuParams
     {
         public static readonly int OutputTarget = Shader.PropertyToID("_OutputTarget");
+    }
+
+    private static class CameraShaderParams
+    {
+        public static readonly int _InvCameraViewProj = Shader.PropertyToID("_InvCameraViewProj");
+        public static readonly int _WorldSpaceCameraPos = Shader.PropertyToID("_WorldSpaceCameraPos");
+        public static readonly int _CameraFarDistance = Shader.PropertyToID("_CameraFarDistance");
     }
 
     public void Setup()
@@ -44,6 +52,7 @@ public class OutputColorRenderPass : ScriptableRenderPass
 
     public override void Execute(ScriptableRenderContext context, ref RenderingData renderingData)
     {
+        m_Camera = renderingData.cameraData.camera;
         CommandBuffer cmd = CommandBufferPool.Get("OutputColorPass");
 
         if (_ray_tracing_shader == null)
@@ -54,6 +63,13 @@ public class OutputColorRenderPass : ScriptableRenderPass
 
         using (new ProfilingScope(cmd, new ProfilingSampler("RayTracing")))
         {
+            cmd.SetGlobalVector(CameraShaderParams._WorldSpaceCameraPos, m_Camera.transform.position);
+            var projMatrix = GL.GetGPUProjectionMatrix(m_Camera.projectionMatrix, false);
+            var viewMatrix = m_Camera.worldToCameraMatrix;
+            var viewProjMatrix = projMatrix * viewMatrix;
+            var invViewProjMatrix = Matrix4x4.Inverse(viewProjMatrix);
+            cmd.SetGlobalMatrix(CameraShaderParams._InvCameraViewProj, invViewProjMatrix);
+
             cmd.SetRayTracingTextureParam(_ray_tracing_shader, GpuParams.OutputTarget, _output_target);
             cmd.SetRayTracingShaderPass(_ray_tracing_shader, "RayTracing");
 
