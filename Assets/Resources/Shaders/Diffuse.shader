@@ -73,8 +73,6 @@ Shader "Tutorial/Diffuse"
             #include "Common.hlsl"
             #include "PRNG.hlsl"
 
-            #include "UnityRaytracingMeshUtils.cginc"
-
             struct IntersectionVertex
             {
                 // Object space normal of the vertex
@@ -111,7 +109,35 @@ Shader "Tutorial/Diffuse"
                 float3x3 objectToWorld = (float3x3)ObjectToWorld3x4();
                 float3 normalWS = normalize(mul(objectToWorld, normalOS));
 
-                rayIntersection.color = float4(0.5f * (normalWS + 1.0f), 0.0f);
+                float4 color = float4(0, 0, 0, 1);
+                if (rayIntersection.remainingDepth > 0)
+                {
+                    // Get position in world space.
+                    float3 origin = WorldRayOrigin();
+                    float3 direction = WorldRayDirection();
+                    float t = RayTCurrent();
+                    float3 positionWS = origin + t * direction;
+
+                    // Make reflection ray.
+                    RayDesc rayDesc;
+                    rayDesc.Origin = positionWS + 0.001f * normalWS;
+                    rayDesc.Direction = normalize(normalWS + GetRandomOnUnitSphere(rayIntersection.PRNGStates));
+                    rayDesc.TMin = 1e-5f;
+                    rayDesc.TMax = _CameraFarDistance;
+
+                    // Tracing reflection.
+                    RayIntersection reflectionRayIntersection;
+                    reflectionRayIntersection.remainingDepth = rayIntersection.remainingDepth - 1;
+                    reflectionRayIntersection.PRNGStates = rayIntersection.PRNGStates;
+                    reflectionRayIntersection.color = float4(0, 0, 0, 0);
+
+                    TraceRay(_AccelerationStructure, RAY_FLAG_CULL_BACK_FACING_TRIANGLES, 0xFF, 0, 1, 0, rayDesc, reflectionRayIntersection);
+
+                    rayIntersection.PRNGStates = reflectionRayIntersection.PRNGStates;
+                    color = reflectionRayIntersection.color;
+                }
+
+                rayIntersection.color = _Color * 0.5f * color;
             }
 
             ENDHLSL

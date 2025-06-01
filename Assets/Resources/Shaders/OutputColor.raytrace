@@ -42,6 +42,7 @@ void AntialiasingRayGenShader()
         rayDesc.TMax = _CameraFarDistance;
 
         RayIntersection rayIntersection;
+        rayIntersection.remainingDepth = MAX_DEPTH - 1;
         rayIntersection.PRNGStates = PRNGStates;
         rayIntersection.color = float4(0.0f, 0.0f, 0.0f, 0.0f);
 
