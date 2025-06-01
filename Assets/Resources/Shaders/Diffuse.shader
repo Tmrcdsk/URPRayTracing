@@ -70,17 +70,10 @@ Shader "Tutorial/Diffuse"
             
             #pragma raytracing test
 
+            #include "Common.hlsl"
+            #include "PRNG.hlsl"
+
             #include "UnityRaytracingMeshUtils.cginc"
-
-            struct AttributeData
-            {
-                float2 barycentrics;
-            };
-
-            struct RayIntersection
-            {
-                float4 color;
-            };
 
             struct IntersectionVertex
             {

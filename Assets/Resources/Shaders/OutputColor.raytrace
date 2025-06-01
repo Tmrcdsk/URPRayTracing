@@ -1,36 +1,14 @@
-#pragma max_recursion_depth 1
+#pragma max_recursion_depth 11
 
-#define CBUFFER_START(name) cbuffer name {
-#define CBUFFER_END };
+#include "Common.hlsl"
+#include "PRNG.hlsl"
 
-CBUFFER_START(CameraBuffer)
-  float4x4 _InvCameraViewProj;
-  float3   _WorldSpaceCameraPos;
-  float    _CameraFarDistance;
-CBUFFER_END
-
-struct RayIntersection
-{
-  float4 color;
-};
-
-RaytracingAccelerationStructure _AccelerationStructure;
+#define MAX_DEPTH (10)
+#define NUM_OF_SAMPLES (4)
 
 RWTexture2D<float4> _OutputTarget;
-
-inline void GenerateCameraRay(out float3 origin, out float3 direction)
-{
-  // center in the middle of the pixel.
-  float2 xy = DispatchRaysIndex().xy + 0.5f;
-  float2 screenPos = xy / DispatchRaysDimensions().xy * 2.0f - 1.0f;
-
-  // Un project the pixel coordinate into a ray.
-  float4 world = mul(_InvCameraViewProj, float4(screenPos, 0, 1));
-
-  world.xyz /= world.w;
-  origin = _WorldSpaceCameraPos.xyz;
-  direction = normalize(world.xyz - origin);
-}
+float4 _OutputTargetSize;
+int _FrameIndex;
 
 inline float3 BackgroundColor(float3 origin, float3 direction)
 {
@@ -39,26 +17,48 @@ inline float3 BackgroundColor(float3 origin, float3 direction)
 }
 
 [shader("raygeneration")]
-void AddASphereRayGenShader()
+void AntialiasingRayGenShader()
 {
     const uint2 dispatchIdx = DispatchRaysIndex().xy;
+    const uint PRNGIndex = dispatchIdx.y * (int)_OutputTargetSize.x + dispatchIdx.x;
+    uint4 PRNGStates = _PRNGStates[PRNGIndex];
     
-    float3 origin;
-    float3 direction;
-    GenerateCameraRay(origin, direction);
+    float4 finalColor = float4(0.0f, 0.0f, 0.0f, 0.0f);
+    for (int i = 0; i < NUM_OF_SAMPLES; i++)
+    {
+        float3 origin;
+        float3 direction;
+        // 使用分层抖动采样来提高抗锯齿质量
+        float2 offset = float2(
+            (i % 2 + GetRandomValue(PRNGStates)) / 2.0,
+            (i / 2 + GetRandomValue(PRNGStates)) / 2.0
+        );
+        GenerateCameraRayWithOffset(origin, direction, offset);
 
-    RayDesc rayDesc;
-    rayDesc.Origin = origin;
-    rayDesc.Direction = direction;
-    rayDesc.TMin = 1e-5f;
-    rayDesc.TMax = _CameraFarDistance;
+        RayDesc rayDesc;
+        rayDesc.Origin = origin;
+        rayDesc.Direction = direction;
+        rayDesc.TMin = 1e-5f;
+        rayDesc.TMax = _CameraFarDistance;
 
-    RayIntersection rayIntersection;
-    rayIntersection.color = float4(0.0f, 0.0f, 0.0f, 0.0f);
+        RayIntersection rayIntersection;
+        rayIntersection.PRNGStates = PRNGStates;
+        rayIntersection.color = float4(0.0f, 0.0f, 0.0f, 0.0f);
 
-    TraceRay(_AccelerationStructure, RAY_FLAG_CULL_BACK_FACING_TRIANGLES, 0xFF, 0, 1, 0, rayDesc, rayIntersection);
+        TraceRay(_AccelerationStructure, RAY_FLAG_CULL_BACK_FACING_TRIANGLES, 0xFF, 0, 1, 0, rayDesc, rayIntersection);
+        PRNGStates = rayIntersection.PRNGStates;
+        finalColor += rayIntersection.color;
+    }
+    
+    _PRNGStates[PRNGIndex] = PRNGStates;
+    if (_FrameIndex > 1)
+    {
+        float a = 1.0f / (float)_FrameIndex;
+        finalColor = _OutputTarget[dispatchIdx] * (1.0f - a) + finalColor * a;
+    }
+    finalColor /= (float)NUM_OF_SAMPLES;
 
-    _OutputTarget[dispatchIdx] = rayIntersection.color;
+    _OutputTarget[dispatchIdx] = finalColor;
 }
 
 [shader("miss")]
